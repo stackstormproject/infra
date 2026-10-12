@@ -19,3 +19,14 @@ Broader project: https://github.com/stackstormproject
 ## Deployed application
 
 Staging URL: to be added when hosting is configured.
+
+## Shared CI/CD
+
+Reusable GitHub Actions workflows live in `.github/workflows`:
+
+- `backend-ci.yml`: lint, format check, unit and integration tests, security scan, deploy
+- `frontend-ci.yml`: lint, format check, build, tests with coverage, security scan, deploy
+
+Each code repo keeps a small `ci.yml` that calls these workflows with `@v1` and `secrets: inherit`.
+
+To change a workflow: open a PR here, merge it, then move the `v1` tag.
