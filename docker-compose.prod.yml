@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: stackstorm_postgres_prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stackstorm_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass}
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-stackstorm_prod}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - stackstorm_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: stackstorm_redis_prod
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata_prod:/data
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - stackstorm_net
+
+  backend:
+    container_name: stackstorm_backend_prod
+    build:
+      context: ${BACKEND_CONTEXT:-../backend}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ${ENV_FILE:-.env}
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_pass}@postgres:5432/${POSTGRES_DB:-stackstorm_prod}
+      REDIS_URL: redis://redis:6379
+      DATABASE_SSL: 'false'
+    ports:
+      - '127.0.0.1:5000:5000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5000/api/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - stackstorm_net
+
+  frontend-customer:
+    container_name: stackstorm_customer_prod
+    build:
+      context: ${FRONTEND_CONTEXT:-../frontend}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:80/ || exit 1']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - stackstorm_net
+
+  frontend-admin:
+    container_name: stackstorm_admin_prod
+    build:
+      context: ${ADMIN_CONTEXT:-../stackstorm-frontend-admin}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8080:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:80/ || exit 1']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks:
+      - stackstorm_net
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:
+
+networks:
+  stackstorm_net:
+    driver: bridge
