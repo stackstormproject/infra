@@ -7,6 +7,32 @@ on:
         required: false
       PRODUCTION_DEPLOY_HOOK:
         required: false
+      VPS_HOST:
+        required: false
+      VPS_USERNAME:
+        required: false
+      VPS_SSH_KEY:
+        required: false
+      VPS_SSH_PORT:
+        required: false
+      VPS_DEPLOY_PATH:
+        required: false
+      STAGING_VPS_HOST:
+        required: false
+      STAGING_VPS_USERNAME:
+        required: false
+      STAGING_VPS_SSH_KEY:
+        required: false
+      STAGING_VPS_DEPLOY_PATH:
+        required: false
+      PROD_VPS_HOST:
+        required: false
+      PROD_VPS_USERNAME:
+        required: false
+      PROD_VPS_SSH_KEY:
+        required: false
+      PROD_VPS_DEPLOY_PATH:
+        required: false
 
 jobs:
   lint:
@@ -79,15 +105,51 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     environment: staging
     steps:
-      - name: Trigger the staging deploy hook
+      - name: Trigger Staging Deploy Webhook
+        if: ${{ (secrets.STAGING_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '') && secrets.STAGING_DEPLOY_HOOK != '' }}
         env:
           DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
         run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "Staging deploy hook is not configured yet, skipping"
-            exit 0
-          fi
+          echo "Triggering staging deploy webhook..."
           curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
+
+      - name: Deploy to Staging VPS via SSH
+        if: ${{ secrets.STAGING_VPS_SSH_KEY != '' || secrets.VPS_SSH_KEY != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_VPS_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.STAGING_VPS_USERNAME || secrets.VPS_USERNAME || 'ubuntu' }}
+          key: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script: |
+            set -e
+            DEPLOY_DIR="${{ secrets.STAGING_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
+            echo "🚀 Auto-deploying backend to Staging VPS at $DEPLOY_DIR..."
+            cd "$DEPLOY_DIR"
+
+            if [ -f "./infra/deploy.sh" ]; then
+              chmod +x ./infra/deploy.sh
+              ./infra/deploy.sh backend develop
+            elif [ -f "./deploy.sh" ]; then
+              chmod +x ./deploy.sh
+              ./deploy.sh backend develop
+            else
+              if [ -d "backend" ]; then
+                cd backend && git fetch origin develop && git checkout develop && git pull origin develop && cd ..
+              else
+                git pull origin develop
+              fi
+              docker compose -f infra/docker-compose.prod.yml up -d --build --no-deps backend
+              docker compose -f infra/docker-compose.prod.yml exec -T backend npx sequelize-cli db:migrate
+              docker image prune -f
+            fi
+            echo "✅ Staging backend deployment complete!"
+
+      - name: Verify Staging Deployment Credentials
+        if: ${{ secrets.STAGING_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '' && secrets.STAGING_DEPLOY_HOOK == '' }}
+        run: |
+          echo "⚠️ Staging deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (STAGING_DEPLOY_HOOK) configured."
+          exit 0
 
   deploy-production:
     name: Deploy to Production
@@ -96,12 +158,48 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
     steps:
-      - name: Trigger the production deploy hook
+      - name: Trigger Production Deploy Webhook
+        if: ${{ (secrets.PROD_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '') && secrets.PRODUCTION_DEPLOY_HOOK != '' }}
         env:
           DEPLOY_HOOK: ${{ secrets.PRODUCTION_DEPLOY_HOOK }}
         run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "Production deploy hook is not configured yet, skipping"
-            exit 0
-          fi
+          echo "Triggering production deploy webhook..."
           curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
+
+      - name: Deploy to Production VPS via SSH
+        if: ${{ secrets.PROD_VPS_SSH_KEY != '' || secrets.VPS_SSH_KEY != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_VPS_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.PROD_VPS_USERNAME || secrets.VPS_USERNAME || 'ubuntu' }}
+          key: ${{ secrets.PROD_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script: |
+            set -e
+            DEPLOY_DIR="${{ secrets.PROD_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
+            echo "🚀 Auto-deploying backend to Production VPS at $DEPLOY_DIR..."
+            cd "$DEPLOY_DIR"
+
+            if [ -f "./infra/deploy.sh" ]; then
+              chmod +x ./infra/deploy.sh
+              ./infra/deploy.sh backend main
+            elif [ -f "./deploy.sh" ]; then
+              chmod +x ./deploy.sh
+              ./deploy.sh backend main
+            else
+              if [ -d "backend" ]; then
+                cd backend && git fetch origin main && git checkout main && git pull origin main && cd ..
+              else
+                git pull origin main
+              fi
+              docker compose -f infra/docker-compose.prod.yml up -d --build --no-deps backend
+              docker compose -f infra/docker-compose.prod.yml exec -T backend npx sequelize-cli db:migrate
+              docker image prune -f
+            fi
+            echo "✅ Production backend deployment complete!"
+
+      - name: Verify Production Deployment Credentials
+        if: ${{ secrets.PROD_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '' && secrets.PRODUCTION_DEPLOY_HOOK == '' }}
+        run: |
+          echo "⚠️ Production deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (PRODUCTION_DEPLOY_HOOK) configured."
+          exit 0
