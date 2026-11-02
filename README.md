@@ -1,6 +1,7 @@
 # infra
 
-Infrastructure as Code for **StackStorm** (Dickwella Fashion Corner ecommerce): Docker, docker-compose, CI/CD workflows and deployment scripts.
+Infrastructure as Code for **StackStorm** (Dickwella Fashion Corner ecommerce): Docker,
+docker-compose, CI/CD workflows and deployment scripts.
 
 Broader project: https://github.com/stackstormproject
 
@@ -18,60 +19,80 @@ Broader project: https://github.com/stackstormproject
 
 ## Deployed application
 
-Staging URL: Configured on VPS (`develop` branch auto-deployment)
-Production URL: Configured on VPS (`main` branch auto-deployment)
+| Environment | Branch | App | URL |
+| --- | --- | --- | --- |
+| Production | `main` | Customer storefront | https://stackstorm.live/ |
+| Production | `main` | Admin console | https://admin.stackstorm.live/ |
+
+Demo staff accounts for signing in to the deployed admin console (seeded data, not real
+customer accounts):
+
+| Account | Role | Password |
+| --- | --- | --- |
+| `admin@stackstorm.lk` | super_admin | `NewPassword123` |
+| `support@stackstorm.lk` | support_agent | `NewPassword123` |
 
 ## Shared CI/CD & Auto-Deployment
 
 Reusable GitHub Actions workflows live in `.github/workflows`:
 
-- `backend-ci.yml`: lint, format check, unit and integration tests, security scan, and auto-deploy to VPS via SSH or webhook.
-- `frontend-ci.yml`: lint, format check, build, tests with coverage, security scan, and auto-deploy to VPS via SSH or webhook.
+- `backend-ci.yml`: lint, format check, unit and integration tests, security scan, and
+  auto-deploy to the VPS via SSH or webhook.
+- `frontend-ci.yml`: lint, format check, build, tests with coverage, security scan, and
+  auto-deploy to the VPS via SSH or webhook.
 
-Each code repository (`backend`, `frontend`, `stackstorm-frontend-admin`) calls these workflows via `@v1` with `secrets: inherit`.
+Each code repository (`backend`, `stackstorm-frontend-customer`, `stackstorm-frontend-admin`)
+calls these workflows via `@v1` with `secrets: inherit`.
 
-### Auto-Deployment Setup via GitHub Actions SSH
+To change a shared workflow: open a PR here, merge it, then move the `v1` tag.
 
-When any commit is pushed to `develop` (staging) or `main` (production), GitHub Actions automatically runs tests and deploys the updated service to your Cloud VPS without downtime.
+### Auto-deployment via GitHub Actions SSH
 
-#### Required GitHub Secrets
+When a commit is pushed to `develop` (staging) or `main` (production), GitHub Actions runs the
+tests and deploys the updated service to the VPS with no downtime.
 
-Configure the following secrets in your GitHub Organization or Repository settings (**Settings -> Secrets and variables -> Actions**):
+#### Required GitHub secrets
 
-| Secret Name | Description | Example / Default |
-|---|---|---|
-| `VPS_HOST` | Public IP or DNS of your VPS / EC2 instance | `54.210.12.34` or `ec2-...amazonaws.com` |
+Configure these in the GitHub organization or repository settings
+(**Settings → Secrets and variables → Actions**):
+
+| Secret name | Description | Example / default |
+| --- | --- | --- |
+| `VPS_HOST` | Public IP or DNS of the VPS / EC2 instance | `54.210.12.34` or `ec2-...amazonaws.com` |
 | `VPS_USERNAME` | SSH username | `ubuntu` or `ec2-user` |
 | `VPS_SSH_KEY` | Private SSH key (PEM / OpenSSH format) | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `VPS_PORT` | SSH Port (optional, default: 22) | `22` |
-| `VPS_DEPLOY_PATH` | Full directory path on VPS where project lives | `/home/ubuntu/stackstorm` |
+| `VPS_PORT` | SSH port (optional, default: 22) | `22` |
+| `VPS_DEPLOY_PATH` | Full directory path on the VPS where the project lives | `/home/ubuntu/stackstorm` |
 
-*(Optional)* For separate Staging and Production servers, prefix with `STAGING_` (e.g. `STAGING_VPS_HOST`) or `PROD_` (e.g. `PROD_VPS_HOST`). Alternatively, if you use a webhook service (like Portainer or webhook daemon), use `STAGING_DEPLOY_HOOK` or `PRODUCTION_DEPLOY_HOOK`.
+For separate staging and production servers, prefix with `STAGING_` (e.g. `STAGING_VPS_HOST`)
+or `PROD_` (e.g. `PROD_VPS_HOST`). If using a webhook service (Portainer, a webhook daemon),
+use `STAGING_DEPLOY_HOOK` or `PRODUCTION_DEPLOY_HOOK` instead.
 
-### Initial Server (VPS) Setup
+#### Initial server (VPS) setup
 
-On your Ubuntu / EC2 instance:
+On the Ubuntu / EC2 instance:
 
-```bash
+\```bash
 # 1. Install Docker & Git
 sudo apt update && sudo apt install -y git docker.io docker-compose-v2
 sudo usermod -aG docker $USER
 
-# 2. Clone the repositories into your deployment folder
+# 2. Clone the repositories into the deployment folder
 mkdir -p /home/ubuntu/stackstorm && cd /home/ubuntu/stackstorm
 git clone https://github.com/stackstormproject/infra.git
 git clone https://github.com/stackstormproject/backend.git
-git clone https://github.com/stackstormproject/frontend.git
+git clone https://github.com/stackstormproject/stackstorm-frontend-customer.git
 git clone https://github.com/stackstormproject/stackstorm-frontend-admin.git
 
 # 3. Configure production environment
 cd infra
 cp .env.prod.example .env
-nano .env  # Fill in production secrets (JWT, DB password, Stripe, etc.)
+nano .env  # fill in production secrets (JWT, DB password, Stripe, etc.)
 
-# 4. Make deployment script executable and run initial deployment
+# 4. Make the deployment script executable and run the initial deployment
 chmod +x deploy.sh
 ./deploy.sh all main
-```
+\```
 
-After initial setup, any push to GitHub will automatically trigger tests, build the updated container, run migrations, and reload the service!
+After this initial setup, any push to GitHub automatically triggers tests, builds the updated
+container, runs migrations, and reloads the service.
