@@ -118,32 +118,44 @@ jobs:
           key: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
           script: |
-            set -e
+            set -euo pipefail
+
             DEPLOY_DIR="${{ secrets.STAGING_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
             REPO_NAME="${{ github.repository }}"
-            TARGET_SERVICE="frontend-customer"
-            if echo "$REPO_NAME" | grep -qi "admin"; then
-              TARGET_SERVICE="frontend-admin"
-            fi
-            echo "🚀 Auto-deploying $TARGET_SERVICE ($REPO_NAME) to Staging VPS at $DEPLOY_DIR..."
+
             cd "$DEPLOY_DIR"
 
-            if [ -f "./infra/deploy.sh" ]; then
-              chmod +x ./infra/deploy.sh
-              ./infra/deploy.sh "$TARGET_SERVICE" develop
-            elif [ -f "./deploy.sh" ]; then
-              chmod +x ./deploy.sh
-              ./deploy.sh "$TARGET_SERVICE" develop
-            else
-              if [ "$TARGET_SERVICE" = "frontend-admin" ]; then
-                [ -d "stackstorm-frontend-admin" ] && cd stackstorm-frontend-admin && git fetch origin develop && git checkout develop && git pull origin develop && cd ..
-              else
-                [ -d "frontend" ] && cd frontend && git fetch origin develop && git checkout develop && git pull origin develop && cd ..
-              fi
-              docker compose -f infra/docker-compose.prod.yml up -d --build --no-deps "$TARGET_SERVICE"
-              docker image prune -f
-            fi
-            echo "✅ Staging $TARGET_SERVICE deployment complete!"
+            case "$REPO_NAME" in
+              stackstormproject/stackstorm-frontend-customer)
+                REPO_DIR="stackstorm-frontend-customer"
+                TARGET_SERVICE="customer"
+                ;;
+              stackstormproject/stackstorm-frontend-admin)
+                REPO_DIR="stackstorm-frontend-admin"
+                TARGET_SERVICE="admin"
+                ;;
+              *)
+                echo "Unsupported frontend repository: $REPO_NAME"
+                exit 1
+                ;;
+            esac
+
+            echo "Deploying $REPO_DIR to service $TARGET_SERVICE"
+
+            test -d "$REPO_DIR/.git"
+            test -f "infra/docker-compose.prod.yml"
+            test -f "infra/.env.prod"
+
+            git -C "$REPO_DIR" fetch origin develop
+            git -C "$REPO_DIR" checkout develop
+            git -C "$REPO_DIR" pull --ff-only origin develop
+
+            docker compose \
+              --env-file infra/.env.prod \
+              -f infra/docker-compose.prod.yml \
+              up -d --build --no-deps "$TARGET_SERVICE"
+
+            echo "Staging deployment completed successfully."
 
       - name: Verify Staging Deployment Credentials
         if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK == '' }}
