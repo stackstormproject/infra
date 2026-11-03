@@ -52,10 +52,13 @@ deployment script detects this layout automatically).
 Demo staff accounts for signing in to the deployed admin console (seeded data, not real
 customer accounts):
 
-| Account | Role | Password |
-| --- | --- | --- |
-| `admin@stackstorm.lk` | super_admin | `NewPassword123` |
-| `support@stackstorm.lk` | support_agent | `NewPassword123` |
+| Account | Role |
+| --- | --- |
+| `admin@stackstorm.lk` | super_admin |
+| `support@stackstorm.lk` | support_agent |
+
+Use the password provided through the deployment's secure credential handoff. Do not store
+staff passwords in this repository.
 
 ## Shared CI/CD & Auto-Deployment
 
