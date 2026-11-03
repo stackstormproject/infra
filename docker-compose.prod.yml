@@ -39,7 +39,7 @@ services:
   backend:
     container_name: stackstorm_backend_prod
     build:
-      context: ${BACKEND_CONTEXT:-../backend}
+      context: ${BACKEND_CONTEXT:-../backend/backend}
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:

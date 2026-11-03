@@ -1,0 +1,108 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stackstorm_dev_docker}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stackstorm-local-only}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-stackstorm_dev_docker}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6380}:6379'
+    volumes:
+      - redisdata_local:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ${BACKEND_CONTEXT:-../backend/backend}
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-stackstorm-local-only}@postgres:5432/${POSTGRES_DB:-stackstorm_dev_docker}
+      DATABASE_SSL: 'false'
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-local-development-only-secret-change-this-before-use}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      REFRESH_TOKEN_EXPIRES_IN: ${REFRESH_TOKEN_EXPIRES_IN:-7d}
+      BCRYPT_WORK_FACTOR: ${BCRYPT_WORK_FACTOR:-12}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      FRONTEND_URL: http://localhost:${CUSTOMER_PORT:-5175}
+      FRONTEND_ADMIN_URL: http://localhost:${ADMIN_PORT:-5176}
+      ADMIN_URL: http://localhost:${ADMIN_PORT:-5176}
+      STORAGE_DRIVER: local
+      UPLOAD_DIR: /usr/src/app/uploads
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-change-me-local-only}
+      SEED_CUSTOMER_PASSWORD: ${SEED_CUSTOMER_PASSWORD:-change-me-local-only}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    ports:
+      - '127.0.0.1:${BACKEND_PORT:-5001}:5000'
+    volumes:
+      - uploads_local:/usr/src/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ['sh', '-c', 'npx sequelize-cli db:migrate && npm start']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5000/api/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend-customer:
+    build:
+      context: ${FRONTEND_CONTEXT:-../frontend}
+      dockerfile: Dockerfile
+    ports:
+      - '127.0.0.1:${CUSTOMER_PORT:-5175}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:80/ >/dev/null || exit 1']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  frontend-admin:
+    build:
+      context: ${ADMIN_CONTEXT:-../stackstorm-frontend-admin}
+      dockerfile: Dockerfile
+    ports:
+      - '127.0.0.1:${ADMIN_PORT:-5176}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:80/ >/dev/null || exit 1']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  pgdata_local:
+  redisdata_local:
+  uploads_local:
