@@ -142,7 +142,7 @@ case "$SERVICE" in
 
     echo "🗄️ Executing database migrations..."
     sleep 5
-    docker compose -f "$COMPOSE_FILE" exec -T backend npx sequelize-cli db:migrate || true
+    docker compose -f "$COMPOSE_FILE" exec -T backend npx sequelize-cli db:migrate
 
     echo "🩺 All services status:"
     docker compose -f "$COMPOSE_FILE" ps

@@ -97,9 +97,12 @@ jobs:
     needs: security
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     environment: staging
+    env:
+      DEPLOY_SSH_KEY: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+      DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
     steps:
       - name: Trigger Staging Deploy Webhook
-        if: ${{ (secrets.STAGING_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '') && secrets.STAGING_DEPLOY_HOOK != '' }}
+        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK != '' }}
         env:
           DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
         run: |
@@ -107,7 +110,7 @@ jobs:
           curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
 
       - name: Deploy to Staging VPS via SSH
-        if: ${{ secrets.STAGING_VPS_SSH_KEY != '' || secrets.VPS_SSH_KEY != '' }}
+        if: ${{ env.DEPLOY_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAGING_VPS_HOST || secrets.VPS_HOST }}
@@ -115,35 +118,47 @@ jobs:
           key: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
           script: |
-            set -e
+            set -euo pipefail
+
             DEPLOY_DIR="${{ secrets.STAGING_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
             REPO_NAME="${{ github.repository }}"
-            TARGET_SERVICE="frontend-customer"
-            if echo "$REPO_NAME" | grep -qi "admin"; then
-              TARGET_SERVICE="frontend-admin"
-            fi
-            echo "🚀 Auto-deploying $TARGET_SERVICE ($REPO_NAME) to Staging VPS at $DEPLOY_DIR..."
+
             cd "$DEPLOY_DIR"
 
-            if [ -f "./infra/deploy.sh" ]; then
-              chmod +x ./infra/deploy.sh
-              ./infra/deploy.sh "$TARGET_SERVICE" develop
-            elif [ -f "./deploy.sh" ]; then
-              chmod +x ./deploy.sh
-              ./deploy.sh "$TARGET_SERVICE" develop
-            else
-              if [ "$TARGET_SERVICE" = "frontend-admin" ]; then
-                [ -d "stackstorm-frontend-admin" ] && cd stackstorm-frontend-admin && git fetch origin develop && git checkout develop && git pull origin develop && cd ..
-              else
-                [ -d "frontend" ] && cd frontend && git fetch origin develop && git checkout develop && git pull origin develop && cd ..
-              fi
-              docker compose -f infra/docker-compose.prod.yml up -d --build --no-deps "$TARGET_SERVICE"
-              docker image prune -f
-            fi
-            echo "✅ Staging $TARGET_SERVICE deployment complete!"
+            case "$REPO_NAME" in
+              stackstormproject/stackstorm-frontend-customer)
+                REPO_DIR="stackstorm-frontend-customer"
+                TARGET_SERVICE="customer"
+                ;;
+              stackstormproject/stackstorm-frontend-admin)
+                REPO_DIR="stackstorm-frontend-admin"
+                TARGET_SERVICE="admin"
+                ;;
+              *)
+                echo "Unsupported frontend repository: $REPO_NAME"
+                exit 1
+                ;;
+            esac
+
+            echo "Deploying $REPO_DIR to service $TARGET_SERVICE"
+
+            test -d "$REPO_DIR/.git"
+            test -f "infra/docker-compose.prod.yml"
+            test -f "infra/.env.prod"
+
+            git -C "$REPO_DIR" fetch origin develop
+            git -C "$REPO_DIR" checkout develop
+            git -C "$REPO_DIR" pull --ff-only origin develop
+
+            docker compose \
+              --env-file infra/.env.prod \
+              -f infra/docker-compose.prod.yml \
+              up -d --build --no-deps "$TARGET_SERVICE"
+
+            echo "Staging deployment completed successfully."
 
       - name: Verify Staging Deployment Credentials
-        if: ${{ secrets.STAGING_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '' && secrets.STAGING_DEPLOY_HOOK == '' }}
+        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK == '' }}
         run: |
           echo "⚠️ Staging deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (STAGING_DEPLOY_HOOK) configured."
           exit 0
@@ -154,9 +169,12 @@ jobs:
     needs: security
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
+    env:
+      DEPLOY_SSH_KEY: ${{ secrets.PROD_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+      DEPLOY_HOOK: ${{ secrets.PRODUCTION_DEPLOY_HOOK }}
     steps:
       - name: Trigger Production Deploy Webhook
-        if: ${{ (secrets.PROD_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '') && secrets.PRODUCTION_DEPLOY_HOOK != '' }}
+        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK != '' }}
         env:
           DEPLOY_HOOK: ${{ secrets.PRODUCTION_DEPLOY_HOOK }}
         run: |
@@ -164,7 +182,7 @@ jobs:
           curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
 
       - name: Deploy to Production VPS via SSH
-        if: ${{ secrets.PROD_VPS_SSH_KEY != '' || secrets.VPS_SSH_KEY != '' }}
+        if: ${{ env.DEPLOY_SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.PROD_VPS_HOST || secrets.VPS_HOST }}
@@ -200,7 +218,7 @@ jobs:
             echo "✅ Production $TARGET_SERVICE deployment complete!"
 
       - name: Verify Production Deployment Credentials
-        if: ${{ secrets.PROD_VPS_SSH_KEY == '' && secrets.VPS_SSH_KEY == '' && secrets.PRODUCTION_DEPLOY_HOOK == '' }}
+        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK == '' }}
         run: |
           echo "⚠️ Production deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (PRODUCTION_DEPLOY_HOOK) configured."
           exit 0
