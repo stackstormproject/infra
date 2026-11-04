@@ -3,10 +3,6 @@ name: Frontend CI
 on:
   workflow_call:
     secrets:
-      STAGING_DEPLOY_HOOK:
-        required: false
-      PRODUCTION_DEPLOY_HOOK:
-        required: false
       VPS_HOST:
         required: false
       VPS_USERNAME:
@@ -16,14 +12,6 @@ on:
       VPS_SSH_PORT:
         required: false
       VPS_DEPLOY_PATH:
-        required: false
-      STAGING_VPS_HOST:
-        required: false
-      STAGING_VPS_USERNAME:
-        required: false
-      STAGING_VPS_SSH_KEY:
-        required: false
-      STAGING_VPS_DEPLOY_PATH:
         required: false
       PROD_VPS_HOST:
         required: false
@@ -43,7 +31,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: npm
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
@@ -57,7 +45,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: npm
       - run: npm ci
       - run: npm run build
 
@@ -70,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: npm
       - run: npm ci
       - run: npm run test:coverage
       - uses: actions/upload-artifact@v4
@@ -87,102 +75,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'npm'
+          cache: npm
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
 
-  deploy-staging:
-    name: Deploy to Staging
+  deploy-frontend:
+    name: Deploy Selected Frontend to Production
     runs-on: ubuntu-latest
     needs: security
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    environment: staging
-    env:
-      DEPLOY_SSH_KEY: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
-      DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
     steps:
-      - name: Trigger Staging Deploy Webhook
-        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK != '' }}
+      - name: Validate deployment credentials
         env:
-          DEPLOY_HOOK: ${{ secrets.STAGING_DEPLOY_HOOK }}
+          SSH_HOST: ${{ secrets.PROD_VPS_HOST || secrets.VPS_HOST }}
+          SSH_KEY: ${{ secrets.PROD_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
         run: |
-          echo "Triggering staging deploy webhook..."
-          curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
+          test -n "$SSH_HOST" || { echo "Missing VPS host secret"; exit 1; }
+          test -n "$SSH_KEY" || { echo "Missing VPS SSH key secret"; exit 1; }
 
-      - name: Deploy to Staging VPS via SSH
-        if: ${{ env.DEPLOY_SSH_KEY != '' }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.STAGING_VPS_HOST || secrets.VPS_HOST }}
-          username: ${{ secrets.STAGING_VPS_USERNAME || secrets.VPS_USERNAME || 'ubuntu' }}
-          key: ${{ secrets.STAGING_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_SSH_PORT || 22 }}
-          script: |
-            set -euo pipefail
-
-            DEPLOY_DIR="${{ secrets.STAGING_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
-            REPO_NAME="${{ github.repository }}"
-
-            cd "$DEPLOY_DIR"
-
-            case "$REPO_NAME" in
-              stackstormproject/stackstorm-frontend-customer)
-                REPO_DIR="stackstorm-frontend-customer"
-                TARGET_SERVICE="customer"
-                ;;
-              stackstormproject/stackstorm-frontend-admin)
-                REPO_DIR="stackstorm-frontend-admin"
-                TARGET_SERVICE="admin"
-                ;;
-              *)
-                echo "Unsupported frontend repository: $REPO_NAME"
-                exit 1
-                ;;
-            esac
-
-            echo "Deploying $REPO_DIR to service $TARGET_SERVICE"
-
-            test -d "$REPO_DIR/.git"
-            test -f "infra/docker-compose.prod.yml"
-            test -f "infra/.env.prod"
-
-            git -C "$REPO_DIR" fetch origin develop
-            git -C "$REPO_DIR" checkout develop
-            git -C "$REPO_DIR" pull --ff-only origin develop
-
-            docker compose \
-              --env-file infra/.env.prod \
-              -f infra/docker-compose.prod.yml \
-              up -d --build --no-deps "$TARGET_SERVICE"
-
-            echo "Staging deployment completed successfully."
-
-      - name: Verify Staging Deployment Credentials
-        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK == '' }}
-        run: |
-          echo "⚠️ Staging deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (STAGING_DEPLOY_HOOK) configured."
-          exit 0
-
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: security
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment: production
-    env:
-      DEPLOY_SSH_KEY: ${{ secrets.PROD_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
-      DEPLOY_HOOK: ${{ secrets.PRODUCTION_DEPLOY_HOOK }}
-    steps:
-      - name: Trigger Production Deploy Webhook
-        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK != '' }}
-        env:
-          DEPLOY_HOOK: ${{ secrets.PRODUCTION_DEPLOY_HOOK }}
-        run: |
-          echo "Triggering production deploy webhook..."
-          curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
-
-      - name: Deploy to Production VPS via SSH
-        if: ${{ env.DEPLOY_SSH_KEY != '' }}
+      - name: Deploy only the changed frontend
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.PROD_VPS_HOST || secrets.VPS_HOST }}
@@ -190,35 +101,25 @@ jobs:
           key: ${{ secrets.PROD_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT || 22 }}
           script: |
-            set -e
+            set -eu
+
+            REPO="${{ github.repository }}"
             DEPLOY_DIR="${{ secrets.PROD_VPS_DEPLOY_PATH || secrets.VPS_DEPLOY_PATH || '/home/ubuntu/stackstorm' }}"
-            REPO_NAME="${{ github.repository }}"
-            TARGET_SERVICE="frontend-customer"
-            if echo "$REPO_NAME" | grep -qi "admin"; then
-              TARGET_SERVICE="frontend-admin"
-            fi
-            echo "🚀 Auto-deploying $TARGET_SERVICE ($REPO_NAME) to Production VPS at $DEPLOY_DIR..."
-            cd "$DEPLOY_DIR"
 
-            if [ -f "./infra/deploy.sh" ]; then
-              chmod +x ./infra/deploy.sh
-              ./infra/deploy.sh "$TARGET_SERVICE" main
-            elif [ -f "./deploy.sh" ]; then
-              chmod +x ./deploy.sh
-              ./deploy.sh "$TARGET_SERVICE" main
-            else
-              if [ "$TARGET_SERVICE" = "frontend-admin" ]; then
-                [ -d "stackstorm-frontend-admin" ] && cd stackstorm-frontend-admin && git fetch origin main && git checkout main && git pull origin main && cd ..
-              else
-                [ -d "frontend" ] && cd frontend && git fetch origin main && git checkout main && git pull origin main && cd ..
-              fi
-              docker compose -f infra/docker-compose.prod.yml up -d --build --no-deps "$TARGET_SERVICE"
-              docker image prune -f
-            fi
-            echo "✅ Production $TARGET_SERVICE deployment complete!"
+            case "$REPO" in
+              stackstormproject/stackstorm-frontend-customer)
+                TARGET="customer"
+                ;;
+              stackstormproject/stackstorm-frontend-admin)
+                TARGET="admin"
+                ;;
+              *)
+                echo "Unsupported repository: $REPO"
+                exit 1
+                ;;
+            esac
 
-      - name: Verify Production Deployment Credentials
-        if: ${{ env.DEPLOY_SSH_KEY == '' && env.DEPLOY_HOOK == '' }}
-        run: |
-          echo "⚠️ Production deployment skipped: No VPS SSH key (VPS_SSH_KEY) or deploy hook (PRODUCTION_DEPLOY_HOOK) configured."
-          exit 0
+            SCRIPT="$DEPLOY_DIR/infra/deploy-frontend-safe.sh"
+            test -x "$SCRIPT"
+            echo "Deploying $TARGET frontend only"
+            "$SCRIPT" "$TARGET"
